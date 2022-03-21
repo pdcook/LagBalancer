@@ -1,4 +1,5 @@
 ﻿using BepInEx;
+using BepInEx.Configuration;
 using HarmonyLib;
 using UnboundLib;
 using UnityEngine;
@@ -16,11 +17,11 @@ using LagBalancer.Extensions;
 namespace LagBalancer
 {
     [BepInDependency("com.willis.rounds.unbound", BepInDependency.DependencyFlags.HardDependency)] // necessary for most modding stuff here
-    [BepInPlugin(ModId, ModName, Version)]
+    [BepInPlugin(ModID, ModName, Version)]
     [BepInProcess("Rounds.exe")]
     public class LagBalancer : BaseUnityPlugin
     {
-        private const string ModId = "pykess.rounds.plugins.lagcompensator";
+        private const string ModID = "pykess.rounds.plugins.lagcompensator";
         private const string ModName = "Lag Compensator";
         public const string Version = "0.0.0";
         private static string CompatibilityModName => ModName.Replace(" ", "");
@@ -33,6 +34,10 @@ namespace LagBalancer
 
         private Harmony harmony;
         private float updateTimer = 0f;
+
+        private static bool LagBalancerEnabled;
+
+        private static ConfigEntry<bool> EnabledConfig;
 
         internal static string GetCustomPropertyKey(string prop)
         {
@@ -65,19 +70,48 @@ namespace LagBalancer
 
         void Awake()
         {
+            EnabledConfig = Config.Bind(CompatibilityModName, "Enable Lag Balancer", false);
+
             instance = this;
             
-            harmony = new Harmony(ModId);
+            harmony = new Harmony(ModID);
             harmony.PatchAll();
         }
         void Start()
         {
+            LagBalancerEnabled = EnabledConfig.Value;
+
             // add credits
-            Unbound.RegisterCredits(ModName, new string[] { "Pykess" }, new string[] { "github", "Support Pykess" }, new string[] { "REPLACE WITH LINK", "https://ko-fi.com/pykess"});
+            Unbound.RegisterCredits(ModName, new string[] { "Pykess" }, new string[] { "github", "Support Pykess" }, new string[] { "https://github.com/pdcook/LagBalancer", "https://ko-fi.com/pykess"});
 
             // add GUI to modoptions menu
-            //Unbound.RegisterMenu(ModName, () => { }, GUI, null, false);
+            Unbound.RegisterMenu(ModName, () => { }, GUI, null, false);
 
+            // handshake to sync settings
+            Unbound.RegisterHandshake(ModID, this.OnHandShakeCompleted);
+
+        }
+        IEnumerator SyncOnGameStart()
+        {
+            if (PhotonNetwork.IsMasterClient)
+            {
+                LagBalancerEnabled = EnabledConfig.Value;
+                NetworkingManager.RPC(typeof(LagBalancer), nameof(SyncSettings), EnabledConfig.Value);
+            }
+            yield break;
+        }
+        void OnHandShakeCompleted()
+        {
+            if (PhotonNetwork.IsMasterClient)
+            {
+                LagBalancerEnabled = EnabledConfig.Value;
+                NetworkingManager.RPC(typeof(LagBalancer), nameof(SyncSettings), EnabledConfig.Value);
+            }
+        }
+        [UnboundRPC]
+        static void SyncSettings(bool lagBalancerEnabled)
+        {
+            LagBalancerEnabled = lagBalancerEnabled;
         }
         /// <summary>
         /// Check if two values with associated uncertainties are consistent
@@ -96,6 +130,7 @@ namespace LagBalancer
         }
         void Update()
         {
+            if (!LagBalancerEnabled) { return; }
             this.updateTimer -= Time.deltaTime;
             if (this.updateTimer < 0f)
             {
@@ -150,6 +185,7 @@ namespace LagBalancer
         {
             MenuHandler.CreateText(ModName, menu, out TextMeshProUGUI _, 60);
             MenuHandler.CreateText(" ", menu, out TextMeshProUGUI _, 30);
+            MenuHandler.CreateToggle(EnabledConfig.Value, "Enable", menu, (val) => { EnabledConfig.Value = val; LagBalancerEnabled = val; });
         }
     }
 }
